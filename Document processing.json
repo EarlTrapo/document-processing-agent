@@ -1,0 +1,1282 @@
+{
+  "name": "Document processing",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "q": "has:attachment subject:document submission"
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        320,
+        0
+      ],
+      "id": "4f4c3131-397d-4eb2-a1a0-7ca93de86239",
+      "name": "Send document",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "P856VXkym26ySq96",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "simple": false,
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        0
+      ],
+      "id": "6ab7ae61-8e00-45bb-a52c-a037c6616876",
+      "name": "Get a message",
+      "webhookId": "6d9b7e71-ea1f-4b18-b81e-483721b028da",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "P856VXkym26ySq96",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of items) {\n  const binaryKeys = Object.keys(item.binary || {});\n\n  let attachment_base64, attachment_name, mime_type;\n\n  // Determine client info based on path\n  let client_email, client_name;\n\n  if (item.json.client_email) {\n    // Tally path — already on item\n    client_email = item.json.client_email;\n    client_name = item.json.client_name;\n  } else {\n    // Gmail path — read from Get a message\n    const fromData = $('Get a message').first().json.from.value[0];\n    client_email = fromData.address;\n    client_name = fromData.name || fromData.address;\n  }\n\n  if (item.json.attachment_base64) {\n    // Tally path\n    attachment_base64 = item.json.attachment_base64;\n    attachment_name = item.json.attachment_name;\n    mime_type = item.json.mime_type;\n  } else {\n    // Gmail path\n    const attachmentKey = binaryKeys[0];\n    const binaryData = await this.helpers.getBinaryDataBuffer(items.indexOf(item), attachmentKey);\n    attachment_base64 = binaryData.toString('base64');\n    attachment_name = item.binary[attachmentKey].fileName;\n    mime_type = item.binary[attachmentKey].mimeType;\n  }\n\n  results.push({\n    json: {\n      ...item.json,\n      client_email,\n      client_name,\n      attachment_base64,\n      attachment_name,\n      mime_type\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "3910b997-cafb-4bf5-a642-7d2451b61851",
+      "name": "simplify label"
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of items) {\n  const classification = item.json.content[0].text.trim().toLowerCase();\n  \n  results.push({\n    json: {\n      document_type: classification,\n      attachment_base64: item.json.attachment_base64,\n      attachment_name: item.json.attachment_name\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        0
+      ],
+      "id": "893bf71c-2a87-4517-bb18-acb77e267d36",
+      "name": "extract label"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": ""
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 1024,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"document\",\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": \"application/pdf\",\n            \"data\": \"{{ $json.attachment_base64 }}\"\n          }\n        },\n        {\n          \"type\": \"text\",\n          \"text\": \"What type of document is this? Reply with only one of: passport, bank_statement, proof_of_address, source_of_funds, investment_intake, unknown\"\n        }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "814b3bb6-f4ac-4649-b4dd-f490b6fba4f1",
+      "name": "claude extracts document type",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Wq5OZFF44OPe2HJX",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": ""
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-20250514\",\n  \"max_tokens\": 1024,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"document\",\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": \"application/pdf\",\n            \"data\": \"{{ $('simplify label').item.json.attachment_base64 }}\"\n          }\n        },\n        {\n          \"type\": \"text\",\n          \"text\": \"This document has been classified as: {{ $json.document_type }}.\\n\\nExtract ONLY the fields for a {{ $json.document_type }}.\\n\\npassport: full_name, passport_number, date_of_birth, expiry_date, nationality\\nbank_statement: account_holder, bank_name, account_number, statement_period, closing_balance\\nproof_of_address: full_name, address, provider, statement_date\\nsource_of_funds: full_name, employment_status, business_name, annual_income, source_description\\ninvestment_intake: full_name, amount_to_invest, risk_score, risk_classification, investment_horizon\\n\\nReturn only the XML for a {{ $json.document_type }}, nothing else.\"\n        }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1456,
+        0
+      ],
+      "id": "85dbceca-0bc5-4a2c-9c8d-8fbe73cc0bb5",
+      "name": "claude extract document details",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "Wq5OZFF44OPe2HJX",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of items) {\n  const text = item.json.content[0].text;\n  \nlet client_email, client_name;\n\nif (item.json.client_email) {\n  client_email = item.json.client_email;\n  client_name = item.json.client_name;\n} else {\n  try {\n    const fromData = $('Get a message').first().json.from.value[0];\n    client_email = fromData.address;\n    client_name = fromData.name || fromData.address;\n  } catch(e) {\n    client_email = '';\n    client_name = '';\n  }\n}\n\n  const extract = (tag) => {\n    const match = text.match(new RegExp(`<${tag}>(.*?)<\\/${tag}>`));\n    return match ? match[1].trim() : null;\n  };\n\n  const docType = item.json.document_type || $('extract label').all()[items.indexOf(item)].json.document_type;\n\n  const fieldMap = {\n    passport: ['full_name', 'passport_number', 'date_of_birth', 'expiry_date', 'nationality'],\n    bank_statement: ['account_holder', 'bank_name', 'account_number', 'statement_period', 'closing_balance'],\n    proof_of_address: ['full_name', 'address', 'provider', 'statement_date'],\n    source_of_funds: ['full_name', 'employment_status', 'business_name', 'annual_income', 'source_description'],\n    investment_intake: ['full_name', 'amount_to_invest', 'risk_score', 'risk_classification', 'investment_horizon']\n  };\n\n  const fields = fieldMap[docType] || [];\n  const extracted = {};\n  fields.forEach(f => extracted[f] = extract(f));\n\n  results.push({\n    json: {\n      document_type: docType,\n      attachment_name: item.json.attachment_name,\n      client_email,\n      client_name,\n      extracted\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        0
+      ],
+      "id": "99a6e645-4722-49f4-b82e-422d224e51ee",
+      "name": "cleanup details"
+    },
+    {
+      "parameters": {
+        "content": "Intake\n",
+        "height": 448,
+        "width": 336,
+        "color": "#326250"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        304,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "5d64d311-76fb-4b66-b091-ca53c5e0f37c",
+      "name": "Intake"
+    },
+    {
+      "parameters": {
+        "content": "Classification",
+        "height": 224,
+        "width": 528,
+        "color": "#32623C"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        832,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "8f268a59-f580-46a2-ad78-32ace503a579",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Extraction",
+        "height": 224,
+        "width": 400,
+        "color": "#326228"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1392,
+        -48
+      ],
+      "typeVersion": 1,
+      "id": "e0d31166-7546-4301-81c8-116b0aae6360",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.document_type }}",
+                    "rightValue": "passport",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "3afe41c7-2290-43d0-9a2d-961013866548"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "passport"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "aa34e0a7-dab9-46de-b1fe-ebb82ccfecc6",
+                    "leftValue": "={{ $json.document_type }}",
+                    "rightValue": "bank_statement",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "statement"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "12e99804-f77e-48ec-826f-ad876b6cd6e7",
+                    "leftValue": "={{ $json.document_type }}",
+                    "rightValue": "proof_of_address",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "POA"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "cc6c5957-d3b9-4341-be08-043838d0f385",
+                    "leftValue": "={{ $json.document_type }}",
+                    "rightValue": "source_of_funds",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "source of funds"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "9bd92d96-2f6d-4ec3-8758-fb77adcdda79",
+                    "leftValue": "={{ $json.document_type }}",
+                    "rightValue": "investment_intake",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "investment"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1840,
+        -48
+      ],
+      "id": "e8777359-1a43-4fc8-a65c-d1e193757347",
+      "name": "separate docs"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = { ...item.extracted, ...item };\nconst issues = [];\nlet status = 'pass';\n\n// Hard fail checks\nif (!d.document_type || d.document_type !== 'passport') {\n  issues.push('Document is not a passport');\n  status = 'hard_fail';\n}\nif (d.expiry_date) {\n  const expiry = new Date(d.expiry_date);\n  const today = new Date();\n  if (expiry < today) {\n    issues.push(`Passport is expired (expired: ${d.expiry_date})`);\n    status = 'hard_fail';\n  }\n}\nif (!d.full_name) {\n  issues.push('Full name could not be extracted — document may be unreadable');\n  status = 'hard_fail';\n}\nif (!d.passport_number) {\n  issues.push('Passport number missing — document may be unreadable');\n  if (status !== 'hard_fail') status = 'hard_fail';\n}\n\n// Soft flag checks (only if not already hard_fail)\nif (status !== 'hard_fail') {\n  if (!d.nationality) {\n    issues.push('Nationality field missing — advisor review required');\n    status = 'soft_flag';\n  }\n  if (!d.date_of_birth) {\n    issues.push('Date of birth missing — advisor review required');\n    status = 'soft_flag';\n  }\n}\n\nreturn [{\n  json: {\n    ...d,\n    validation: { status, issues }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        -288
+      ],
+      "id": "88e4e4e2-e348-4d64-818b-7c8e13e3ff47",
+      "name": "passport validation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = { ...item.extracted, ...item };\nconst issues = [];\nlet status = 'pass';\n\n// Hard fail checks\nif (!d.account_holder) {\n  issues.push('Account holder name missing — document unreadable or wrong file');\n  status = 'hard_fail';\n}\nif (!d.statement_period) {\n  issues.push('Statement period missing — cannot verify recency');\n  status = 'hard_fail';\n}\n\nif (status !== 'hard_fail') {\n  // Check statement is recent (within 3 months)\n  if (d.statement_period_end) {\n    const endDate = new Date(d.statement_period_end);\n    const threeMonthsAgo = new Date();\n    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);\n    if (endDate < threeMonthsAgo) {\n      issues.push(`Statement is older than 3 months (period end: ${d.statement_period_end})`);\n      status = 'hard_fail';\n    }\n  }\n}\n\n// Soft flag checks\nif (status !== 'hard_fail') {\n  if (!d.closing_balance) {\n    issues.push('Closing balance not found — advisor to verify manually');\n    status = 'soft_flag';\n  }\n  if (d.closing_balance && d.investment_amount) {\n    const balance = parseFloat(String(d.closing_balance).replace(/[^0-9.]/g, ''));\n    const investment = parseFloat(String(d.investment_amount).replace(/[^0-9.]/g, ''));\n    if (!isNaN(balance) && !isNaN(investment) && balance < investment) {\n      issues.push(`Closing balance (${d.closing_balance}) is below proposed investment amount (${d.investment_amount})`);\n      status = 'soft_flag';\n    }\n  }\n  if (!d.bank_name) {\n    issues.push('Bank name not detected — advisor to confirm institution');\n    status = 'soft_flag';\n  }\n}\n\nreturn [{\n  json: {\n    ...d,\n    validation: { status, issues }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2128,
+        -144
+      ],
+      "id": "ccf9a4c3-f7ef-4dc0-807f-ab5d594f6344",
+      "name": "statement validation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = { ...item.extracted, ...item };\nconst issues = [];\nlet status = 'pass';\n\n// Hard fail checks\nif (!d.full_name && !d.account_holder_name) {\n  issues.push('Name not found on document — unreadable or wrong file submitted');\n  status = 'hard_fail';\n}\nif (!d.address) {\n  issues.push('Address could not be extracted');\n  status = 'hard_fail';\n}\nif (!d.statement_date && !d.statement_period_end) {\n  issues.push('Document date missing — cannot verify recency');\n  status = 'hard_fail';\n}\n\nif (status !== 'hard_fail') {\n  // Must be within last 3 months\n  const rawDate = d.statement_date || d.statement_period_end;\n  const docDate = new Date(rawDate);\n  const threeMonthsAgo = new Date();\n  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);\n  if (docDate < threeMonthsAgo) {\n    issues.push(`Proof of address is older than 3 months (dated: ${rawDate})`);\n    status = 'hard_fail';\n  }\n}\n\n// Soft flag checks\nif (status !== 'hard_fail') {\n  // Name on address doc vs passport name mismatch (if passport data available)\n  const poaName = (d.full_name || d.account_holder_name || '').toLowerCase().trim();\n  const passportName = (d.passport_full_name || '').toLowerCase().trim();\n  if (passportName && poaName && poaName !== passportName) {\n    issues.push(`Name on proof of address (${poaName}) does not match passport name (${passportName})`);\n    status = 'soft_flag';\n  }\n  if (!d.provider) {\n    issues.push('Issuing institution not detected — advisor to confirm document source');\n    status = 'soft_flag';\n  }\n}\n\nreturn [{\n  json: {\n    ...d,\n    validation: { status, issues }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2128,
+        -16
+      ],
+      "id": "23b1ed48-d62b-4412-8718-ea63fc3d637f",
+      "name": "POA validation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = { ...item.extracted, ...item };\nconst issues = [];\nlet status = 'pass';\n\n// Hard fail checks\nif (!d.full_name && !d.account_holder_name) {\n  issues.push('Name not found — document unreadable or wrong file');\n  status = 'hard_fail';\n}\nif (!d.source_description && !d.fund_source) {\n  issues.push('Source of funds description missing — document incomplete');\n  status = 'hard_fail';\n}\n\n// Soft flag checks\nif (status !== 'hard_fail') {\n  const highRiskKeywords = ['crypto', 'cryptocurrency', 'gambling', 'gift', 'loan', 'inheritance'];\n  const sourceText = (d.source_description || d.fund_source || '').toLowerCase();\n  const flagged = highRiskKeywords.filter(k => sourceText.includes(k));\n  if (flagged.length > 0) {\n    issues.push(`Source of funds contains elevated-risk terms: ${flagged.join(', ')} — advisor review required`);\n    status = 'soft_flag';\n  }\n  if (!d.annual_income && !d.total_value) {\n    issues.push('Annual income or total value not specified — advisor to verify');\n    status = 'soft_flag';\n  }\n  if (!d.supporting_institution) {\n    issues.push('Supporting institution or documentation reference not detected');\n    if (status === 'pass') status = 'soft_flag';\n  }\n}\n\nreturn [{\n  json: {\n    ...d,\n    validation: { status, issues }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        112
+      ],
+      "id": "1af22449-005c-4752-840e-4acf4c8c7878",
+      "name": "fund source validation"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst d = { ...item.extracted, ...item };\nconst issues = [];\nlet status = 'pass';\n\n// Hard fail checks\nif (!d.full_name && !d.client_name) {\n  issues.push('Client name missing — form incomplete or unreadable');\n  status = 'hard_fail';\n}\nif (!d.amount_to_invest && !d.proposed_amount) {\n  issues.push('Investment amount not specified');\n  status = 'hard_fail';\n}\n\n// Soft flag checks\nif (status !== 'hard_fail') {\n  const amount = parseFloat(String(d.amount_to_invest || d.proposed_amount || '0').replace(/[^0-9.]/g, ''));\n  if (amount > 500000) {\n    issues.push(`High-value investment (${d.d.amount_to_invest || d.proposed_amount}) — enhanced due diligence required`);\n    status = 'soft_flag';\n  }\n  if (!d.risk_classification) {\n    issues.push('Risk tolerance not declared — advisor to confirm with client');\n    status = 'soft_flag';\n  }\n  if (!d.investment_horizon) {\n    issues.push('Investment time horizon not specified');\n    if (status === 'pass') status = 'soft_flag';\n  }\n}\n\nreturn [{\n  json: {\n    ...d,\n    validation: { status, issues }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        256
+      ],
+      "id": "7d0c9382-8dfe-4823-8800-ae02780ee216",
+      "name": "investment validation"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.client_email }}",
+        "subject": "=Action Required: Document Resubmission Needed — {{ $('cleanup details').item.json.extracted.full_name }}",
+        "message": "=<p>Dear {{ $('cleanup details').item.json.extracted.full_name }},</p>\n\n<p>Thank you for submitting your documents. Unfortunately, we were unable to process the following:</p>\n\n{{ $json.hard_fail_documents.map(d => '<p><strong>' + d.document_type + '</strong><br>' + d.issues.join('<br>') + '</p>').join('') }}\n\n{{ $json.soft_flag_documents.length > 0 ? '<p>The following documents also require attention:</p>' + $json.soft_flag_documents.map(d => '<p><strong>' + d.document_type + '</strong><br>' + d.issues.join('<br>') + '</p>').join('') : '' }}\n\n<p>Please resubmit corrected versions at your earliest convenience. If you have any questions, reply to this email and an advisor will assist you.</p>\n\n<p>Regards,<br>ECO Onboarding Team</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3008,
+        -208
+      ],
+      "id": "6282b113-35d9-46a5-a4d0-650320e22673",
+      "name": "Inform user",
+      "webhookId": "43d7c2e8-e280-43f5-a694-65251816228a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "P856VXkym26ySq96",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "advisor@yourfirm.com",
+        "subject": "=<p>A document has been received that requires your review before proceeding.</p>\n\n<p><strong>Client:</strong> {{ $('cleanup details').item.json.extracted.full_name }}<br>\n<strong>Document type:</strong> {{ $json.document_type }}<br>\n<strong>Validation status:</strong> SOFT FLAG</p>\n\n<p><strong>Flags raised:</strong><br>{{ $json.validation.issues.join('<br>') }}</p>\n\n<p>Please review and take appropriate action before proceeding with this client's onboarding.</p>\n\n<p>ECO Onboarding Team</p>",
+        "emailType": "text",
+        "message": "=A document has been received that requires your review before proceeding.  \n\nClient: {{ $('cleanup details').item.json.extracted.full_name }} \nDocument type: {{ $json.document_type }} \nValidation status: SOFT FLAG  \nFlags raised: {{ $json.validation.issues.join('\\n') }}  \n\nPlease review and take appropriate action. The extracted document data is below for reference.  Full extracted fields: {{ JSON.stringify($json, null, 2) }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3088,
+        -48
+      ],
+      "id": "1d4e09de-aa2e-4a60-b555-74b83b789d18",
+      "name": "contact advisor",
+      "webhookId": "c4237fd8-4c2b-4cbf-9c21-5f79f104f86b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "P856VXkym26ySq96",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "elvisohbee@gmail.com",
+        "subject": "=✅ Verified Document Ready — {{ $('cleanup details').item.json.extracted.full_name }} ",
+        "message": "=<p>A client has passed all automated validation checks and is ready for your records.</p>  <p><strong>Client:</strong> {{ $('cleanup details').item.json.extracted.full_name }}<br> <strong>Document details:</strong> {{ $json.document_summary }}<br> <strong>Validation status:</strong> PASS</p>  <p>No issues flagged. You may proceed with onboarding.</p>  <p>ECO Onboarding Team</p>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3008,
+        96
+      ],
+      "id": "6df61db4-7488-43bf-8efc-6980c9dd0891",
+      "name": "Approval",
+      "webhookId": "a22bbe66-24fc-4de4-a202-ccc2b521da5f",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "P856VXkym26ySq96",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Validation",
+        "height": 736,
+        "width": 704,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1808,
+        -320
+      ],
+      "typeVersion": 1,
+      "id": "dbe15f2f-996e-48c4-a8a3-6aa8bde7791b",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = items[0];\nconst binaryKeys = Object.keys(item.binary || {});\n\nreturn binaryKeys.map(key => ({\n  json: {\n    ...item.json,\n    attachmentKey: key\n  },\n  binary: {\n    [key]: item.binary[key]\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "28f16408-5923-4695-a7d1-fc5b155b09e0",
+      "name": "split attachments"
+    },
+    {
+      "parameters": {
+        "jsCode": "const allItems = $input.all();\n\nconst validations = allItems.map(item => ({\n  document_type: item.json.document_type,\n  status: item.json.validation?.status || 'hard_fail',\n  issues: item.json.validation?.issues || [],\n  client_email: item.json.client_email,\n  client_name: item.json.client_name,\n  extracted: item.json.extracted\n}));\n\nconst hardFails = validations.filter(v => v.status === 'hard_fail');\nconst softFlags = validations.filter(v => v.status === 'soft_flag');\nconst passes = validations.filter(v => v.status === 'pass');\n\n// Decision logic\nlet decision;\nif (hardFails.length > 0) {\n  decision = 'failed_submission';\n} else if (softFlags.length > 1) {\n  decision = 'slight_error';\n} else if (softFlags.length === 1) {\n  decision = 'approved';\n} else {\n  decision = 'approved';\n}\n\n// Pull client info from first available item\nconst clientEmail = validations[0]?.client_email;\nconst clientName = validations[0]?.client_name;\n\n// Build summary per document for email body\nconst documentSummary = validations.map(v => {\n  const issueText = v.issues.length > 0 ? v.issues.join('; ') : 'No issues';\n  return `${v.document_type}: ${v.status.toUpperCase()} — ${issueText}`;\n});\n\nreturn [{\n  json: {\n    decision,\n    client_email: clientEmail,\n    client_name: clientName,\n    total_documents: validations.length,\n    hard_fail_count: hardFails.length,\n    soft_flag_count: softFlags.length,\n    pass_count: passes.length,\n    hard_fail_documents: hardFails.map(v => ({ document_type: v.document_type, issues: v.issues })),\n    soft_flag_documents: softFlags.map(v => ({ document_type: v.document_type, issues: v.issues })),\n    document_summary: documentSummary\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -48
+      ],
+      "id": "8a3b162e-b162-45fc-80e5-9df27de15039",
+      "name": "compile status"
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2336,
+        -96
+      ],
+      "id": "9a169b42-4207-4a5b-a6b4-3c0bc27d3343",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "failed_submission",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "27508ba5-56c7-419b-a532-fec0562f8acb"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "failed submission"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "76f2e6c9-262d-4c55-a9f1-04f4d46d5e43",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "slight_error",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "soft flag"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "7ff95810-107d-4afb-931c-d98776ede508",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "approved",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "successful"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2832,
+        -64
+      ],
+      "id": "e2a99344-36d5-459d-abd9-48741496ddfc",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appeIqNYQI59PFIit",
+          "mode": "list",
+          "cachedResultName": " ECO Document Processing",
+          "cachedResultUrl": "https://airtable.com/appeIqNYQI59PFIit"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tbllxjNQTMfJ84Nsm",
+          "mode": "list",
+          "cachedResultName": "Document Submissions",
+          "cachedResultUrl": "https://airtable.com/appeIqNYQI59PFIit/tbllxjNQTMfJ84Nsm"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "submission_date": "={{ new Date().toLocaleDateString('en-GB') }}",
+            "client_name": "={{ $json.client_name }}",
+            "full_name": "={{ $json.extracted.full_name }}",
+            "client_email": "={{ $json.client_email }}",
+            "document_type": "={{ $json.document_type }}",
+            "attachment_name": "={{ $json.attachment_name }}",
+            "passport_number": "={{ $json.extracted.passport_number }}",
+            "expiry_date": "={{ $json.extracted.expiry_date }}",
+            "nationality": "={{ $json.extracted.nationality }}",
+            "account_holder": "={{ $json.account_holder }}",
+            "bank_name": "={{ $json.extracted.bank_name }}",
+            "closing_balance": "={{ $json.closing_balance }}",
+            "validation_status": "={{ $json.validation.status }}",
+            "validation_issues": "={{ $json.validation.issues.length > 0 ? $json.validation.issues.join(', ') : 'None' }}",
+            "statement_period": "={{ $json.statement_period }}",
+            "address": "={{ $json.address }}",
+            "provider": "={{ $json.provider }}",
+            "statement_date": "={{ $json.statement_date }}",
+            "employment_status": "={{ $json.employment_status }}",
+            "source_description": "={{ $json.source_description }}",
+            "amount_to_invest": "={{ $json.amount_to_invest }}",
+            "risk_classification": "={{ $json.risk_classification }}",
+            "investment_horizon": "={{ $json.investment_horizon }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "submission_date",
+              "displayName": "submission_date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "client_name",
+              "displayName": "client_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "client_email",
+              "displayName": "client_email",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "document_type",
+              "displayName": "document_type",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "attachment_name",
+              "displayName": "attachment_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "validation_status",
+              "displayName": "validation_status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "validation_issues",
+              "displayName": "validation_issues",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "passport_number",
+              "displayName": "passport_number",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "expiry_date",
+              "displayName": "expiry_date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "nationality",
+              "displayName": "nationality",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "account_holder",
+              "displayName": "account_holder",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "bank_name",
+              "displayName": "bank_name",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "closing_balance",
+              "displayName": "closing_balance",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "statement_period",
+              "displayName": "statement_period",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "address",
+              "displayName": "address",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "provider",
+              "displayName": "provider",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "statement_date",
+              "displayName": "statement_date",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "employment_status",
+              "displayName": "employment_status",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "source_description",
+              "displayName": "source_description",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "amount_to_invest",
+              "displayName": "amount_to_invest",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "risk_classification",
+              "displayName": "risk_classification",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "investment_horizon",
+              "displayName": "investment_horizon",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "overall_decision",
+              "displayName": "overall_decision",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        2576,
+        -400
+      ],
+      "id": "8f49dc51-ac88-4d63-84f5-8eadb3f6bf89",
+      "name": "Storage",
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "H8sUbXmWpPh4qCXx",
+          "name": "Airtable Personal Access Token account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Routing",
+        "height": 576,
+        "width": 672,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2608,
+        -240
+      ],
+      "typeVersion": 1,
+      "id": "4954c996-96f3-4e22-b91f-7dd36177ebc8",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "formId": "1AK0l1"
+      },
+      "type": "n8n-nodes-tallyforms.tallyTrigger",
+      "typeVersion": 2,
+      "position": [
+        480,
+        208
+      ],
+      "id": "bf1eac17-b0b7-420d-ba2d-9225c438ffb3",
+      "name": "Tally Trigger",
+      "webhookId": "50eaaba6-b2ba-4063-9c12-22237e9d9f51",
+      "credentials": {
+        "tallyApi": {
+          "id": "cFQEjuonkAoHE9od",
+          "name": "Tally account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Send document": {
+      "main": [
+        [
+          {
+            "node": "Get a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a message": {
+      "main": [
+        [
+          {
+            "node": "split attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "simplify label": {
+      "main": [
+        [
+          {
+            "node": "claude extracts document type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extract label": {
+      "main": [
+        [
+          {
+            "node": "claude extract document details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "claude extracts document type": {
+      "main": [
+        [
+          {
+            "node": "extract label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "claude extract document details": {
+      "main": [
+        [
+          {
+            "node": "cleanup details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cleanup details": {
+      "main": [
+        [
+          {
+            "node": "separate docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "separate docs": {
+      "main": [
+        [
+          {
+            "node": "passport validation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "statement validation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "POA validation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "fund source validation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "investment validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "passport validation": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "statement validation": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "POA validation": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "fund source validation": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "investment validation": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "split attachments": {
+      "main": [
+        [
+          {
+            "node": "simplify label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "compile status": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Storage",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "compile status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Inform user",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "contact advisor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Storage": {
+      "main": [
+        []
+      ]
+    },
+    "Tally Trigger": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "8c60d649-0bc0-4ba0-902f-576e40c26f78",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e2c9a93f8ff49d86192cf418d081c92e44d8bc4ec881d6e698a0353938e16a65"
+  },
+  "id": "ephKBehOZXnSZ8C6",
+  "tags": []
+}
