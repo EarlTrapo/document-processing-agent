@@ -103,6 +103,7 @@ This isn't a document classifier. It's a full intake operations layer.
 - **Parallel validation** — each document type has its own validator running simultaneously. The Merge node compiles all results before any routing decision is made.
 - **Three-way routing logic** — the Switch node doesn't just pass/fail. It distinguishes between hard failures (missing/invalid documents), soft flags (needs advisor review), and clean approvals. Each path triggers the appropriate communication.
 - **Storage on every submission** — every intake creates a record regardless of outcome. Full audit trail out of the box.
+- **Follow-up scope** — since every intake is recorded, team can track failed applications that don't come back and decide a follow up method  
 
 ---
 
